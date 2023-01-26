@@ -1,0 +1,110 @@
+---
+- name: Copy the node_exporter systemd service file
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: 0644
+  notify: restart node_exporter
+
+- name: Configure node_exporter
+  when:
+    ( node_exporter_tls_server_config | length > 0 ) or
+    ( node_exporter_http_server_config | length > 0 ) or
+    ( node_exporter_basic_auth_users | length > 0 )
+  block:
+    - name: Create node_exporter config directory
+      ansible.builtin.file:
+        path: "/etc/node_exporter"
+        state: directory
+        owner: root
+        group: root
+        mode: u+rwX,g+rwX,o=rX
+
+    - name: Copy the node_exporter config file
+      ansible.builtin.template:
+        src: config.yaml.j2
+        dest: /etc/node_exporter/config.yaml
+        owner: root
+        group: root
+        mode: 0644
+      notify: restart node_exporter
+
+- name: Create textfile collector dir
+  ansible.builtin.file:
+    path: "{{ node_exporter_textfile_dir }}"
+    state: directory
+    owner: "{{ _node_exporter_system_user }}"
+    group: "{{ _node_exporter_system_group }}"
+    recurse: true
+    mode: u+rwX,g+rwX,o=rX
+  when: node_exporter_textfile_dir | length > 0
+
+- name: Allow node_exporter port in SELinux on RedHat OS family
+  community.general.seport:
+    ports: "{{ node_exporter_web_listen_address.split(':')[-1] }}"
+    proto: tcp
+    setype: http_port_t
+    state: present
+  when:
+    - ansible_version.full is version_compare('2.4', '>=')
+    - ansible_selinux.status == "enabled"
+
+- name: Check if pip3 is installed
+  ansible.builtin.command:
+    cmd: which pip3
+  register: pip3_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Install pip3
+  ansible.builtin.apt:
+    name: python3-pip
+  register: pip3_install
+  when:
+    - pip3_check.rc is defined
+    - not pip3_check.rc == 0
+
+- name: Install cryptography python package
+  ansible.builtin.pip:
+    name: cryptography
+  when:
+    - (pip3_check is not skipped and pip3_check.rc is defined and pip3_check.rc == 0) or (pip3_install is succeeded and pip3_install is not skipped)
+
+- name: Check if cryptography python package is installed
+  ansible.builtin.command:
+    cmd: pip3 freeze | grep cryptography
+  register: cryptography_check
+  ignore_errors: true
+  when:
+    - (pip3_check is not skipped and pip3_check.rc is defined and pip3_check.rc == 0) or (pip3_install is succeeded and pip3_install is not skipped)
+
+- name: Check /etc/node_exporter exists
+  ansible.builtin.stat:
+    path: "/etc/node_exporter"
+  register: node_exporter_dir
+
+- name: Create private key (RSA, 4096 bits)
+  community.crypto.openssl_privatekey:
+    path: /etc/node_exporter/tls.key
+    owner: "{{ _node_exporter_system_group }}"
+    group: "{{ _node_exporter_system_group }}"
+  when:
+    - cryptography_check is defined
+    - cryptography_check.rc is defined
+    - cryptography_check.rc == 0
+    - node_exporter_dir.stat.exists
+
+- name: Create cert and key
+  community.crypto.x509_certificate:
+    path: /etc/node_exporter/tls.cert
+    privatekey_path: /etc/node_exporter/tls.key
+    provider: selfsigned
+    owner: "{{ _node_exporter_system_group }}"
+    group: "{{ _node_exporter_system_group }}"
+  when:
+    - cryptography_check is defined
+    - cryptography_check.rc is defined
+    - cryptography_check.rc == 0
+    - node_exporter_dir.stat.exists
