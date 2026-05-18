@@ -51,34 +51,9 @@
     - ansible_version.full is version_compare('2.4', '>=')
     - ansible_selinux.status == "enabled"
 
-- name: Check if pip3 is installed
-  ansible.builtin.command:
-    cmd: which pip3
-  register: pip3_check
-  ignore_errors: true
-  changed_when: false
-
-- name: Install pip3
-  ansible.builtin.apt:
-    name: python3-pip
-  register: pip3_install
-  when:
-    - pip3_check.rc is defined
-    - not pip3_check.rc == 0
-
 - name: Install cryptography python package
-  ansible.builtin.pip:
-    name: cryptography
-  when:
-    - (pip3_check is not skipped and pip3_check.rc is defined and pip3_check.rc == 0) or (pip3_install is succeeded and pip3_install is not skipped)
-
-- name: Check if cryptography python package is installed
-  ansible.builtin.command:
-    cmd: pip3 freeze | grep cryptography
-  register: cryptography_check
-  ignore_errors: true
-  when:
-    - (pip3_check is not skipped and pip3_check.rc is defined and pip3_check.rc == 0) or (pip3_install is succeeded and pip3_install is not skipped)
+  ansible.builtin.package:
+    name: python3-cryptography
 
 - name: Check /etc/node_exporter exists
   ansible.builtin.stat:
