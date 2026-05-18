@@ -1,56 +1,63 @@
+# Ansible Role for node exporter with auto TLS configuration
+
 [![CI](https://github.com/Asya-kawai/ansible-role-node-exporter/actions/workflows/ci.yml/badge.svg)](https://github.com/Asya-kawai/ansible-role-node-exporter/actions/workflows?query=workflow%3ACI)
 
-# Ansible Role: node-exporter
+## 概要
 
-## Description
+このAnsibleロールは、Prometheusの[Node Exporter](https://github.com/prometheus/node_exporter)をサーバに自動デプロイします。
+TLSやBasic認証など実運用に必要な設定を容易に行えます。
 
-Deploy prometheus [node exporter](https://github.com/prometheus/node_exporter) using ansible.
+> 本ロールは [prometheus-community/ansible](https://github.com/prometheus-community/ansible/tree/main/roles/node_exporter) の node_exporter ロールをフォークし、日本語ドキュメントや一部機能追加を行ったものです。
+> **フォーク元の貢献者・ライセンス等は必ず[元リポジトリ](https://github.com/prometheus-community/ansible/tree/main/roles/node_exporter)をご参照ください。**
 
-It is forked from [prometheus-community node_exporter](https://github.com/prometheus-community/ansible/tree/main/roles/node_exporter).
+## 特徴・仕組み
 
-## Requirements
+- 任意バージョンのNode Exporterを自動インストール
+- Collectorの有効/無効化やTextfile Collector用ディレクトリの自動作成
+- systemdサービスとして有効化
+- TLS証明書・鍵の自動配置および設定
+- Basic認証ユーザーの設定（bcryptによる自動ハッシュ化）
 
-- Ansible >= 2.9 (It might work on previous versions, but we cannot guarantee it)
-- gnu-tar on Mac deployer host (`brew install gnu-tar`)
-- Passlib is required when using the basic authentication feature (`pip install passlib[bcrypt]`)
+## 主要変数例
 
-## Role Variables
+`defaults/main.yml` も参照してください。
 
-All variables which can be overridden are stored in [defaults/main.yml](defaults/main.yml) and are listed in the table below.
-
-| Name           | Default Value | Description                        |
-| -------------- | ------------- | -----------------------------------|
-| `node_exporter_version` | 1.5.0 | Node exporter package version. Also accepts latest as parameter. |
-| `node_exporter_binary_local_dir` | "" | Enables the use of local packages instead of those distributed on github. The parameter may be set to a directory where the `node_exporter` binary is stored on the host where ansible is run. This overrides the `node_exporter_version` parameter |
-| `node_exporter_web_listen_address` | "0.0.0.0:9100" | Address on which node exporter will listen |
-| `node_exporter_web_telemetry_path` | "/metrics" | Path under which to expose metrics |
-| `node_exporter_enabled_collectors` | ```["systemd",{textfile: {directory: "{{node_exporter_textfile_dir}}"}}]``` | List of dicts defining additionally enabled collectors and their configuration. It adds collectors to [those enabled by default](https://github.com/prometheus/node_exporter#enabled-by-default). |
-| `node_exporter_disabled_collectors` | [] | List of disabled collectors. By default node_exporter disables collectors listed [here](https://github.com/prometheus/node_exporter#disabled-by-default). |
-| `node_exporter_textfile_dir` | "/var/lib/node_exporter" | Directory used by the [Textfile Collector](https://github.com/prometheus/node_exporter#textfile-collector). To get permissions to write metrics in this directory, users must be in `node-exp` system group. __Note__: More information in TROUBLESHOOTING.md guide.
-| `node_exporter_tls_server_config` | {} | Configuration for TLS authentication. Keys and values are the same as in [node_exporter docs](https://github.com/prometheus/node_exporter/blob/master/https/README.md#sample-config). |
-| `node_exporter_http_server_config` | {} | Config for HTTP/2 support. Keys and values are the same as in [node_exporter docs](https://github.com/prometheus/node_exporter/blob/master/https/README.md#sample-config). |
-| `node_exporter_basic_auth_users` | {} | Dictionary of users and password for basic authentication. Passwords are automatically hashed with bcrypt. |
-
-## Example
-
-### Playbook
-
-Use it in a playbook as follows:
 ```yaml
-- hosts: all
-  roles:
-    - node_exporter
+# Node Exporterのバージョン
+node_exporter_version: "1.11.1"
+# 9100番で全インターフェース待受
+node_exporter_web_listen_address: "0.0.0.0:9100"
+# TLSサーバ設定例
+node_exporter_tls_server_config:
+  cert_file: /etc/node_exporter/tls.cert
+  key_file: /etc/node_exporter/tls.key
+# Basic認証ユーザー例
+node_exporter_basic_auth_users:
+  randomuser: examplepassword
+# 有効化するCollector例
+node_exporter_enabled_collectors:
+  - systemd
+  - textfile: { directory: "/var/lib/node_exporter" }
 ```
 
-### TLS config
+## 注意事項
 
-Before running node_exporter role, the user needs to provision their own certificate and key.
+- Basic認証を有効にする場合、`passlib`（`pip install passlib[bcrypt]`）が必要です。
+- Macでデプロイする場合は`gnu-tar`が必要です（`brew install gnu-tar`）。
+- 証明書・鍵ファイルは事前に用意してください。
+- 変数の詳細は `defaults/main.yml` を参照してください。
+
+## 実行例
+
+### Playbook例
+
 ```yaml
 - hosts: all
+  become: yes
   roles:
     - node_exporter
   vars:
-    # tls.cert and tls.key will be created as self self-certificates.
+    # 証明書および鍵は自己署名で自動生成されます
     node_exporter_tls_server_config:
       cert_file: /etc/node_exporter/tls.cert
       key_file: /etc/node_exporter/tls.key
@@ -58,14 +65,27 @@ Before running node_exporter role, the user needs to provision their own certifi
       randomuser: examplepassword
 ```
 
-## Local Testing
+### Makefileによるテスト
 
-The preferred way of locally testing the role is to use Docker and [molecule](https://github.com/ansible-community/molecule) (v3.x). You will have to install Docker on your system. See "Get started" for a Docker package suitable for your system. Running your tests is as simple as executing `molecule test`.
+```sh
+# 依存インストール
+make deps
+# テスト用コンテナ作成
+make create-nodes
+# Playbook生成
+make generate-playbook
+# Inventory生成
+make generate-inventory
+# テスト実行
+make test-role
+# 後片付け
+make destroy
+```
 
-## Troubleshooting
+## トラブルシューティング
 
-See [troubleshooting](TROUBLESHOOTING.md).
+詳細は [TROUBLESHOOTING.md](TROUBLESHOOTING.md) を参照してください。
 
-## License
+## ライセンス
 
-This project is licensed under MIT License. See [LICENSE](/LICENSE) for more details.
+MIT License（詳細は[LICENSE](LICENSE)参照）。
